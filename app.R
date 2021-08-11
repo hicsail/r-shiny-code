@@ -13,7 +13,11 @@ ui <- fluidPage(
         "United States" = "united-states",
         "China" = "china",
         "United Kingdom" = "united-kingdom"
-      ))
+      )),
+      dateRangeInput("dates", label = h3("Date range")),
+      
+      hr(),
+      fluidRow(column(4, verbatimTextOutput("value")))
     ),
     mainPanel(
       textOutput("data")
@@ -21,46 +25,51 @@ ui <- fluidPage(
   ),
 )
 
+
+covid_api <- function(path) {
+    url <- modify_url("https://api.covid19api.com", path = path)
+    # url <- "https://api.covid19api.com/status/404"
+    
+    resp <- RETRY("GET", url=url, times = 5, pause_base = 1, pause_cap = 1)
+    
+    if (http_error(resp)) {
+      x <- data.frame("CountryName" = "", "RecentCases" = 0, "Status" = resp$status)
+    
+    } else {
+      this.raw.content <- rawToChar(resp$content)
+      this.content <- fromJSON(this.raw.content)
+      allCases <- this.content$Cases
+      recentCases <- tail(allCases, n=1)
+      countryName <- this.content$Country[1]
+      
+      x <- data.frame("CountryName" = countryName, "RecentCases" = recentCases, "Status" = resp$status)
+      
+    }
+}
+
+
 # Define server logic ----
 server <- function(input, output) {
   
   output$data <- renderText({
-    url  <- "https://api.covid19api.com"
     countrySlug <- switch(input$country,
       "united-states" = "united-states",
       "china" = "china",
       "united-kingdom" = "united-kingdom")
     
-    path <- paste("total/country/", countrySlug, "/status/confirmed?from=2021-07-20T00:00:00Z&to=2021-07-21T00:00:00Z", collapse = NULL)
+    firstDate <- input$dates[1]
+    secondDate <- input$dates[2]
+    
+    path <- paste("/total/country/", countrySlug, "/status/confirmed?from=", firstDate, "00:00:00Z&to=", secondDate, "T00:00:00Z", collapse = NULL)
     path <- gsub(" ", "", path)
     
-    timoutepath <- "http://httpbin.org/delay/5"
+    c <- covid_api(path=path)
     
-    
-    for (i in 1:5) {
-      raw.result <- GET(url=url, path=path, timeout(5))
-      status <- status_code(raw.result)
-      if (status == 200) {
-        this.raw.content <- rawToChar(raw.result$content)
-        this.content <- fromJSON(this.raw.content)
-        allCases <- this.content$Cases
-        recentCases <- tail(allCases, n=1)
-        countryName <- this.content$Country[1]
-        timeoutTruth <- FALSE
-        break;
-      }
-      timeoutTruth <- TRUE
-      next
-    }
-    Sys.sleep(1)
-    print(class(timeoutTruth))
-    
-    if (timeoutTruth == TRUE) {
-      paste("You have timed out. Status code: ", status)
+    if (c$Status == 200) {
+      paste("There have been", c$RecentCases, "total cases in", c$CountryName, "between", firstDate, "and", secondDate)
     } else {
-      paste("You have", toString(recentCases), "cases in", countryName)
+      paste(http_status(c$Status))
     }
-    
     })
   }
 
